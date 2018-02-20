@@ -1,0 +1,53 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ''
+Parameters:
+  AMI:
+    Description: AMI of OpenVPN Server
+    Type: String
+    Default: ami-7022c60d
+    Description: SSH Key for the OpenVPN Instance
+  SSHKeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: MyImac
+    Description: SSH Key for the OpenVPN Instance
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+  OpenVPNInstanceType:
+    Type: String
+    Default: t2.micro
+    Description: OpenVPN Instance Type
+    
+Resources:
+
+  OpenVPNServerLaunchConfig: 
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties: 
+      KeyName: !Ref  SSHKeyName
+      AssociatePublicIpAddress: false
+      IamInstanceProfile: !ImportValue OpenVpnEC2InstanceProfile
+      ImageId: !Ref AMI
+      SecurityGroups:
+        - !ImportValue OpenVPNInstanceSG
+      InstanceType: !Ref OpenVPNInstanceType
+              
+  OpenVPNServerAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      VPCZoneIdentifier: 
+        - !ImportValue OpenVPNPublicSubnetA
+        - !ImportValue OpenVPNPublicSubnetB
+      LaunchConfigurationName:
+        Ref: OpenVPNServerLaunchConfig
+      DesiredCapacity: '1'
+      MinSize: '1'
+      MaxSize: '2'
+      Tags:
+        - Key: Name
+          Value: !Sub 'OpenVpnServer'
+          PropagateAtLaunch: True
+Outputs:
+  OpenVPNServerAutoScalingGroup:
+    Description: Open VPN Server AutoScaling Group
+    Value: !Ref OpenVPNServerAutoScalingGroup
+    Export:
+      Name: "OpenVPNServerAutoScalingGroup"
