@@ -1,11 +1,11 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: ''
+Description: 'Open VPN Server ASG'
 Parameters:
   AMI:
     Description: AMI of OpenVPN Server
     Type: String
-    Default: ami-7022c60d
+    Default: ami-8b8b68f6
     Description: SSH Key for the OpenVPN Instance
   SSHKeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -18,6 +18,106 @@ Parameters:
     Description: OpenVPN Instance Type
     
 Resources:
+  OpenVPNServerAutoScalingLaunchTopic: 
+    Type: "AWS::SNS::Topic"
+    Properties: 
+      DisplayName: OpenVPNServerAutoScalingGroupTopic
+      TopicName: OpenVPNServerAutoScalingGroupTopic
+      
+      
+  OpenVPNServerAutoScalingLaunchTopicPolicy:
+    Type: "AWS::SNS::TopicPolicy"
+    Properties:
+      Topics:
+        - !Ref OpenVPNServerAutoScalingLaunchTopic
+      PolicyDocument:
+        Version: "2008-10-17"
+        Statement:
+          - Sid: "OpenVPNServerAutoScalingLaunchTopicPolicy"
+            Effect: "Allow"
+            Principal:
+              Service:
+              - autoscaling.amazonaws.com
+            Resource: !Ref OpenVPNServerAutoScalingLaunchTopic
+            Action: "SNS:Publish"
+
+  AssociateEIPtoOpenVPNServerLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Timeout: 60
+      FunctionName: 'AssociateEIPtoOpenVPNServer'
+      Handler: index.lambda_handler
+      Runtime: "python2.7"
+      MemorySize: 128
+      Code:
+        ZipFile: 
+               Fn::Sub:      
+                 - |
+                   import boto3
+                   import botocore
+                   import logging
+                   import json
+                   from botocore.exceptions import ClientError
+
+                   logger = logging.getLogger()
+                   logger.setLevel(logging.INFO)
+
+                   def associate_public_ip(instance_id,allocation_id):
+                       ec2 = boto3.client('ec2')
+                       try:
+                          response = ec2.associate_address(AllocationId=allocation_id,InstanceId=instance_id)
+                          print(response)
+                       except ClientError as e:
+                          logger.error(e)
+                       try:
+                          result = ec2.modify_instance_attribute(InstanceId=instance_id, SourceDestCheck={'Value': False})
+                          print(response)
+                       except ClientError as e:
+                          logger.error(e)
+                          
+                          
+                   def lambda_handler(event, context):
+                       ec2 = boto3.client('ec2')
+                       public_ip = '${EIP}'
+                       print event['Records'][0]['Sns']['Message']
+                       message = event['Records'][0]['Sns']['Message']
+                       message_obj = json.loads(message)
+                       instance_id = message_obj['EC2InstanceId']
+                       try:
+                          response = ec2.describe_addresses(PublicIps=[public_ip,])
+                          print(response)
+                          allocation_id = response['Addresses'][0]['AllocationId']
+                          if not 'InstanceId' in response['Addresses'][0]:
+                                  associate_public_ip(instance_id,allocation_id)
+                          else:
+                                 print response['Addresses'][0]['InstanceId']
+                                 try:
+                                     response = ec2.disassociate_address(PublicIp=public_ip)
+                                     print('Address Disassociated')
+                                     associate_public_ip(public_ip, instance_id)
+                                 except ClientError as e:
+                                        logger.error(e)
+                       except ClientError as e:
+                              logger.error(e)
+                       return 'Hello from Lambda'
+
+                 - { EIP: !ImportValue OpenVpnVpcElasticIP
+                   }      
+      Role: !ImportValue OpenVpnEC2InstanceRoleArn
+      
+  SubscribeLambdaToTopic:
+    Type: "AWS::SNS::Subscription"
+    Properties:
+      Endpoint: !GetAtt AssociateEIPtoOpenVPNServerLambda.Arn
+      Protocol: lambda
+      TopicArn: !Ref  OpenVPNServerAutoScalingLaunchTopic
+      
+  AllowSNSTopicLambdaInvokePermission:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !GetAtt AssociateEIPtoOpenVPNServerLambda.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: sns.amazonaws.com
 
   OpenVPNServerLaunchConfig: 
     Type: "AWS::AutoScaling::LaunchConfiguration"
@@ -29,6 +129,15 @@ Resources:
       SecurityGroups:
         - !ImportValue OpenVPNInstanceSG
       InstanceType: !Ref OpenVPNInstanceType
+      UserData:
+          "Fn::Base64":
+            !Sub |
+              #!/bin/bash
+              sysctl -p
+              yum -y update
+              iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
+              service openvpn stop
+              service openvpn start
               
   OpenVPNServerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
@@ -41,10 +150,16 @@ Resources:
       DesiredCapacity: '1'
       MinSize: '1'
       MaxSize: '2'
+      NotificationConfigurations:
+      - NotificationTypes:
+        - autoscaling:EC2_INSTANCE_LAUNCH
+        TopicARN: !Ref OpenVPNServerAutoScalingLaunchTopic
       Tags:
         - Key: Name
           Value: !Sub 'OpenVpnServer'
           PropagateAtLaunch: True
+          
+    
 Outputs:
   OpenVPNServerAutoScalingGroup:
     Description: Open VPN Server AutoScaling Group

@@ -6,22 +6,46 @@ Parameters:
     Type: Number
     Default: 1194
     Description: OpenVPN UDP port
+  DevVPcCidrBlock:
+    Type: String
+    Default: 10.1.0.0/16 #10.1.0.0 - 10.1.255.255
+    MinLength: '9'
+    MaxLength: '18'
+    Description: CidrBlock for incoming office connection
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
   SourceCidrBlock:
     Type: String
     Default: 86.133.16.132/32 # ** MUST NOT OVERLAP WITH VpcCidrBlock **
+    MinLength: '9'
+    MaxLength: '18'
     Description: CidrBlock for incoming office connection
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
   VpcCidrBlock:
     Type: String
     Default: 10.0.0.0/24 #10.0.0.0 - 10.0.0.255
+    MinLength: '9'
+    MaxLength: '18'
     Description: CidrBlock for OpenVPN VPC
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
   PubSubACidrBlock:
     Type: String
     Default: 10.0.0.0/28 #10.0.0.0 - 10.0.0.15
     Description: CidrBlock for Public Subnet A
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
   PubSubBCidrBlock:
     Type: String
     Default: 10.0.0.16/28 #10.0.0.16 - 10.0.0.31
     Description: CidrBlock for Public Subnet B
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
 
 Resources:
 
@@ -113,23 +137,32 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: SG for OpenVPN Server
+      GroupName: OpenVPNServerSG
       VpcId: !Ref OpenVPNVPC
       SecurityGroupIngress:
-        - IpProtocol: udp
-          FromPort: !Ref OpenVPNPort
-          ToPort: !Ref OpenVPNPort
-          CidrIp: !Ref SourceCidrBlock
-        - IpProtocol: tcp
-          FromPort: 22
-          ToPort: 22
-          CidrIp: !Ref SourceCidrBlock
-
+      - IpProtocol: "-1"
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: !Ref SourceCidrBlock
+      - IpProtocol: "-1"
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: !Ref DevVPcCidrBlock
+      - IpProtocol: icmp
+        FromPort: '8'
+        ToPort: "-1"
+        CidrIp: !Ref SourceCidrBlock
+      Tags:
+        - Key: Name
+          Value: OpenVPNServerSG
+        - Key: Stack
+          Value: !Ref AWS::StackId
  
   OpenVpnConfigDownloadBucket:
     Type: AWS::S3::Bucket
     Properties:
       AccessControl: Private
-      BucketName: config-download
+      BucketName: config-download-vpn3
       VersioningConfiguration:
         Status: Enabled
       BucketEncryption:
@@ -142,6 +175,13 @@ Resources:
       RouteTableIds:
         - !Ref OpenVPNRouteTablePublic
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref OpenVPNVPC
+  SSMVpcEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      RouteTableIds:
+        - !Ref OpenVPNRouteTablePublic
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.ssm'
       VpcId: !Ref OpenVPNVPC
 
   OpenVpnVpcElasticIP:
@@ -160,6 +200,7 @@ Resources:
           Principal:
             Service:
             - ec2.amazonaws.com
+            - lambda.amazonaws.com
           Action:
           - sts:AssumeRole
       Path: "/"
@@ -174,12 +215,21 @@ Resources:
           - Action:
               - ec2:AssociateAddress
               - ec2:DescribeInstances
+              - ec2:DescribeAddresses
+              - ec2:DisassociateAddress
+              - ec2:ModifyInstanceAttribute
             Effect: Allow
             Resource: "*"
           - Action:
               - s3:*
             Effect: Allow
             Resource: "*"
+          - Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Effect: Allow
+            Resource: 'arn:aws:logs:*:*:*'
       Roles:
         - !Ref OpenVpnEC2InstanceRole
 
@@ -233,3 +283,13 @@ Outputs:
     Value: !Ref OpenVpnEC2InstanceProfile
     Export:
       Name: "OpenVpnEC2InstanceProfile"
+  OpenVpnEC2InstanceRoleArn:
+    Description: Open Vpn EC2 Instance Role
+    Value: !GetAtt OpenVpnEC2InstanceRole.Arn
+    Export:
+      Name: "OpenVpnEC2InstanceRoleArn"
+  OpenVpnRouteTable:
+    Description: Open Vpn Vpc Route Table
+    Value: !Ref OpenVPNRouteTablePublic
+    Export:
+      Name: "OpenVPNRouteTablePublic"  

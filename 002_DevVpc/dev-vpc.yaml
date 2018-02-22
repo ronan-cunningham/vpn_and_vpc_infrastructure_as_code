@@ -1,0 +1,250 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: DevVpc Stack
+
+Parameters:
+  OpenVpnVpcCidrBlock:
+    Type: String
+    Default: 10.0.0.0/24 #10.0.0.0 - 10.0.0.255
+    MinLength: '9'
+    MaxLength: '18'
+    Description: CidrBlock for DevVpc Vpc
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  VpcCidrBlock:
+    Type: String
+    Default: 10.1.0.0/16 #10.1.0.0 - 10.1.255.255
+    MinLength: '9'
+    MaxLength: '18'
+    Description: CidrBlock for DevVpc Vpc
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PubSubACidrBlock:
+    Type: String
+    Default: 10.1.0.0/24 #0.1.0.0 - 10.1.0.255
+    Description: CidrBlock for Public Subnet A
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PubSubBCidrBlock:
+    Type: String
+    Default: 10.1.1.0/24 #10.1.1.0 - 10.1.1.255
+    Description: CidrBlock for Public Subnet B
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PrvSubACidrBlock:
+    Type: String
+    Default: 10.1.2.0/24 #10.1.2.0 - 10.1.2.255
+    Description: CidrBlock for Public Subnet A
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PrvSubBCidrBlock:
+    Type: String
+    Default: 10.1.3.0/24 #10.1.3.0 - 10.1.3.255
+    Description: CidrBlock for Public Subnet B
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+Resources:
+
+  DevVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidrBlock
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'false'
+      Tags:
+      - Key: Name
+        Value: devVpc
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  DevPrivateSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Dev RPivate Security Group
+      GroupName: DevPrivateSG
+      VpcId: !Ref DevVpc
+      SecurityGroupIngress:
+      - IpProtocol: "-1"
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: !Ref OpenVpnVpcCidrBlock
+      - IpProtocol: "-1"
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: !Ref VpcCidrBlock
+      - IpProtocol: icmp
+        FromPort: '8'
+        ToPort: "-1"
+        CidrIp: !Ref OpenVpnVpcCidrBlock
+      Tags:
+        - Key: Name
+          Value: DevPrivateSG
+        - Key: Stack
+          Value: !Ref AWS::StackId
+        
+  myInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: DevVpcinternetGateway
+        
+  attachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref myInternetGateway
+      VpcId: !Ref DevVpc
+      
+  Route:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref DevVpcPublicRouteTable 
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref myInternetGateway
+
+  DevVpcPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: DevVpc
+      Tags:
+      - Key: Name
+        Value: DevVpcPrivatelRouteTable
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  DevVpcPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: DevVpc
+      Tags:
+      - Key: Name
+        Value: DevVpcPublicRouteTable
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  DevVpcPublicSubnetA: 
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref PubSubACidrBlock
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !Ref DevVpc
+      Tags:
+      - Key: Name
+        Value: DevPublicSubnetA
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  DevVpcPublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevVpcPublicSubnetA
+      RouteTableId: !Ref DevVpcPublicRouteTable
+        
+  DevVpcPublicSubnetB: 
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}b
+      CidrBlock: !Ref PubSubBCidrBlock
+      MapPublicIpOnLaunch: 'true'
+      VpcId: !Ref DevVpc
+      Tags:
+      - Key: Name
+        Value: DevPublicSubnetB
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  DevVpcPublicSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevVpcPublicSubnetB
+      RouteTableId: !Ref DevVpcPublicRouteTable
+
+  DevVpcPrivateSubnetA: 
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref PrvSubACidrBlock
+      MapPublicIpOnLaunch: 'false'
+      VpcId: !Ref DevVpc
+      Tags:
+      - Key: Name
+        Value: DevPrivateSubnetA
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  DevVpcPrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevVpcPrivateSubnetA
+      RouteTableId: !Ref DevVpcPrivateRouteTable
+
+        
+  DevVpcPrivateSubnetB: 
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}b
+      CidrBlock: !Ref PrvSubBCidrBlock
+      MapPublicIpOnLaunch: 'false'
+      VpcId: !Ref DevVpc
+      Tags:
+      - Key: Name
+        Value: DevPrivateSubnetB
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  DevVpcPrivateSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DevVpcPrivateSubnetB
+      RouteTableId: !Ref DevVpcPrivateRouteTable
+
+
+        
+Outputs:
+  DevVpc:
+    Description: Dev Vpc
+    Value: !Ref DevVpc
+    Export:
+      Name: !Sub "DevVpc"
+  DevVpcPublicSubnetA:
+    Description: Dev Vpc Public Subnet A
+    Value: !Ref DevVpcPublicSubnetA
+    Export:
+      Name: "DevVpcPublicSubnetA"
+  DevVpcPublicSubnetB:
+    Description: Dev Vpc Public Subnet B
+    Value: !Ref DevVpcPublicSubnetB
+    Export:
+      Name: "DevVpcPublicSubnetB"
+  DevVpcPrivateSubnetA:
+    Description: Dev Vpc Private Subnet A
+    Value: !Ref DevVpcPrivateSubnetA
+    Export:
+      Name: "DevVpcPrivateSubnetA"
+  DevVpcPrivateSubnetB:
+    Description: Dev Vpc Private Subnet B
+    Value: !Ref DevVpcPrivateSubnetB
+    Export:
+      Name: "DevVpcPrivateSubnetB"
+  DevVpcPrivateRouteTable:
+    Description: Dev Vpc Private Route Table
+    Value: !Ref DevVpcPrivateRouteTable
+    Export:
+      Name: "DevVpcPrivateRouteTable"
+  DevVpcPublicRouteTable:
+    Description: Dev Vpc Public Route Table
+    Value: !Ref DevVpcPublicRouteTable
+    Export:
+      Name: "DevVpcPublicRouteTable"
+      
