@@ -1,0 +1,16 @@
+aws cloudformation  create-stack --stack-name OpenVpnVpc --template-body file://openvpn-vpc.yaml --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation  update-stack --stack-name OpenVpnVpc --template-body file://openvpn-vpc.yaml --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation  create-stack  --stack-name DevVpc --template-body file://dev-vpc.yaml --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation  create-stack --stack-name DevVpcPeering --template-body file://peer-dev-with-open-vpn.yaml --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation  create-stack --stack-name DevVpcPrivateNACL --template-body file://dev-vpc-private-nacl.yaml --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation  create-stack --stack-name DevVpcPublicNACL --template-body file://dev-vpc-public-nacl.yaml --capabilities CAPABILITY_NAMED_IAM
+aws cloudformation  create-stack --stack-name OpenVpnImageBuilder --template-body file://openvpn-image-builder.yaml --capabilities CAPABILITY_IAM
+aws cloudformation  create-stack --stack-name OpenVpnAsg --template-body file://openvpn-asg.yaml --capabilities CAPABILITY_IAM
+
+
+
+
+
+
+
+

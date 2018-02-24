@@ -1,0 +1,385 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: OpenVpn Stack
+
+Parameters:
+  OpenVpnPort:
+    Type: Number
+    Default: 1194
+    Description: OpenVpn UDP port
+  DevOpenVpnVpcCidrBlock:
+    Type: String
+    Default: 10.1.0.0/16 #10.1.0.0 - 10.1.255.255
+    MinLength: '9'
+    MaxLength: '18'
+    Description: CidrBlock for incoming office connection
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  SourceCidrBlock:
+    Type: String
+    Default: 0.0.0.0/0 # ** MUST NOT OVERLAP WITH OpenVpnVpcCidrBlock **
+    MinLength: '9'
+    MaxLength: '18'
+    Description: CidrBlock for incoming office connection
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  OpenVpnVpcCidrBlock:
+    Type: String
+    Default: 10.0.0.0/24 #10.0.0.0 - 10.0.0.255
+    MinLength: '9'
+    MaxLength: '18'
+    Description: CidrBlock for OpenVpn VPC
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PubSubACidrBlock:
+    Type: String
+    Default: 10.0.0.0/28 #10.0.0.0 - 10.0.0.15
+    Description: CidrBlock for Public Subnet A
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  PubSubBCidrBlock:
+    Type: String
+    Default: 10.0.0.16/28 #10.0.0.16 - 10.0.0.31
+    Description: CidrBlock for Public Subnet B
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+
+Resources:
+
+  OpenVpnVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref OpenVpnVpcCidrBlock
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      InstanceTenancy: default
+      Tags:
+      - Key: Name
+        Value: vpnToolsVPC
+      - Key: Stack
+        Value: !Ref AWS::StackId
+
+  OpenVpnPublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}a
+      CidrBlock: !Ref PubSubACidrBlock
+      MapPublicIpOnLaunch: 'false'
+      VpcId: !Ref OpenVpnVPC
+      Tags:
+      - Key: Name
+        Value: VpnPublicSubnetA
+      - Key: Stack
+        Value: !Ref AWS::StackId
+        
+  OpenVpnPublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Sub ${AWS::Region}b
+      CidrBlock: !Ref PubSubBCidrBlock
+      MapPublicIpOnLaunch: 'false'
+      VpcId: !Ref OpenVpnVPC
+      Tags:
+      - Key: Name
+        Value: VpnPublicSubnetB
+      - Key: Stack
+        Value: !Ref AWS::StackId
+
+  OpenVpnInternetGateway:
+      Type: "AWS::EC2::InternetGateway"
+      Properties:
+        Tags:
+        - Key: Name
+          Value: VpnVpcIGW
+        - Key: Stack
+          Value: !Ref AWS::StackId
+
+  OpenVpnRouteTablePublic:
+      Type: "AWS::EC2::RouteTable"
+      Properties:
+        VpcId: !Ref OpenVpnVPC
+        Tags:
+        - Key: Name
+          Value: VpnVpcPubRouteTable
+        - Key: Stack
+          Value: !Ref AWS::StackId
+
+  AttachInternetGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref OpenVpnVPC
+      InternetGatewayId: !Ref OpenVpnInternetGateway
+
+  RouteDefaultPublic:
+    Type: "AWS::EC2::Route"
+    DependsOn: OpenVpnInternetGateway
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref OpenVpnInternetGateway
+      RouteTableId: !Ref OpenVpnRouteTablePublic
+
+  OpenVpnPublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref OpenVpnPublicSubnetA
+      RouteTableId: !Ref OpenVpnRouteTablePublic
+  OpenVpnPublicSubneBtRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref OpenVpnPublicSubnetB
+      RouteTableId: !Ref OpenVpnRouteTablePublic
+
+
+  OpenVpnInstanceSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: SG for OpenVpn Server
+      GroupName: OpenVpnServerSG
+      VpcId: !Ref OpenVpnVPC
+      SecurityGroupIngress:
+      - IpProtocol: "-1"
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: !Ref SourceCidrBlock
+      - IpProtocol: "-1"
+        FromPort: '0'
+        ToPort: '65535'
+        CidrIp: !Ref DevOpenVpnVpcCidrBlock
+      - IpProtocol: icmp
+        FromPort: '8'
+        ToPort: "-1"
+        CidrIp: !Ref SourceCidrBlock
+      Tags:
+        - Key: Name
+          Value: OpenVpnServerSG
+        - Key: Stack
+          Value: !Ref AWS::StackId
+ 
+  OpenVpnConfigDownloadBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: AES256
+  S3VpcEndpoint:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      RouteTableIds:
+        - !Ref OpenVpnRouteTablePublic
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcId: !Ref OpenVpnVPC
+
+  OpenVpnVpcElasticIP:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: !Ref OpenVpnVPC
+      
+  OpenVpnEC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OpenVpnEC2InstanceRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+
+  OpenVpnEC2InstanceAccessPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: OpenVpn-instance-access-policy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Action:
+              - ds:CreateComputer
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:DescribeLogGroups
+              - logs:DescribeLogStreams
+              - logs:PutLogEvents
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - ds:CreateComputer
+              - ds:DescribeDirectories
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - cloudwatch:PutMetricData
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - ec2messages:AcknowledgeMessage
+              - ec2messages:DeleteMessage
+              - ec2messages:FailMessage
+              - ec2messages:GetEndpoint
+              - ec2messages:GetMessages
+              - ec2messages:SendReply
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - ssm:DescribeAssociation
+              - ssm:DescribeAssociation
+              - ssm:GetDeployablePatchSnapshotForInstance
+              - ssm:GetDocument
+              - ssm:GetManifest
+              - ssm:GetParameters
+              - ssm:ListAssociations
+              - ssm:ListInstanceAssociations
+              - ssm:PutInventory
+              - ssm:PutComplianceItems
+              - ssm:PutConfigurePackageResult
+              - ssm:UpdateAssociationStatus
+              - ssm:UpdateInstanceAssociationStatus
+              - ssm:UpdateInstanceInformation
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - ec2:AssociateAddress
+              - ec2:DescribeInstances
+              - ec2:DescribeAddresses
+              - ec2:DisassociateAddress
+              - ec2:ModifyInstanceAttribute
+              - ec2:DescribeInstanceStatus
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - s3:*
+            Effect: Allow
+            Resource: "*"
+          - Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Effect: Allow
+            Resource: 'arn:aws:logs:*:*:*'
+      Roles:
+        - !Ref OpenVpnEC2InstanceRole
+
+  OpenVpnEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+       - !Ref OpenVpnEC2InstanceRole
+      InstanceProfileName: OpenVpnEC2InstanceProfile
+
+  OpenVpnElasticFileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties: 
+      FileSystemTags:
+        - Key: Name
+          Value: OpenVpnElastFileSystem
+        - Key: Stack
+          Value: !Ref AWS::StackId
+          
+  EFSMountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref OpenVpnVPC
+      GroupDescription: Security group for mount target
+      Tags:
+        - Key: Name
+          Value: EFSMountTargetSecurityGroup
+        - Key: Stack
+          Value: !Ref AWS::StackId
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '2049'
+        ToPort: '2049'
+        CidrIp: !Ref OpenVpnVpcCidrBlock
+        
+  EfsMountTargetOpenVpnPublicSubnetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref OpenVpnElasticFileSystem
+      SubnetId: !Ref OpenVpnPublicSubnetA
+      SecurityGroups: 
+       - !Ref EFSMountTargetSecurityGroup
+      
+  EfsMountTargetOpenVpnPublicSubnetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref OpenVpnElasticFileSystem
+      SubnetId: !Ref OpenVpnPublicSubnetB
+      SecurityGroups:
+       - !Ref EFSMountTargetSecurityGroup
+      
+#https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/quickref-efs.html
+      
+  
+Outputs:
+  EfsMountTargetOpenVpnPublicSubnetA:
+    Description: Efs Mount Target OpenVpn Public SubnetA
+    Value: !Ref EfsMountTargetOpenVpnPublicSubnetA
+    Export:
+      Name: !Sub "EfsMountTargetOpenVpnPublicSubnetA"
+  EfsMountTargetOpenVpnPublicSubnetB:
+    Description: Efs Mount Target OpenVpn Public SubnetB
+    Value: !Ref EfsMountTargetOpenVpnPublicSubnetB
+    Export:
+      Name: !Sub "EfsMountTargetOpenVpnPublicSubnetB"
+  OpenVpnVPC:
+    Description: Open VPN VPC
+    Value: !Ref OpenVpnVPC
+    Export:
+      Name: !Sub "OpenVpnVPC"
+  OpenVpnPublicSubnetA:
+    Description: Open VPN Public Subnet A
+    Value: !Ref OpenVpnPublicSubnetA
+    Export:
+      Name: "OpenVpnPublicSubnetA"
+  OpenVpnPublicSubnetB:
+    Description: Open VPN Public Subnet B
+    Value: !Ref OpenVpnPublicSubnetB
+    Export:
+      Name: "OpenVpnPublicSubnetB"
+  OpenVpnInstanceSG:
+    Description: Open VPN Instance Security Group
+    Value: !Ref OpenVpnInstanceSG
+    Export:
+      Name: "OpenVpnInstanceSG"
+  OpenVpnConfigDownloadBucket:
+    Description: Open Vpn Config Download Bucket
+    Value: !Ref OpenVpnConfigDownloadBucket
+    Export:
+      Name: "OpenVpnConfigDownloadBucket"
+  OpenVpnVpcElasticIP:
+    Description: Open Vpn Vpc Elastic IP
+    Value: !Ref OpenVpnVpcElasticIP
+    Export:
+      Name: "OpenVpnVpcElasticIP"
+  OpenVpnVpcElasticIPAllocationId:
+    Description: Open Vpn Vpc Elastic IP Allocation ID
+    Value: !GetAtt OpenVpnVpcElasticIP.AllocationId
+    Export:
+      Name: "OpenVpnVpcElasticIPAllocationId"
+  OpenVpnEC2InstanceProfile:
+    Description: Open Vpn EC2 Instance Profile
+    Value: !Ref OpenVpnEC2InstanceProfile
+    Export:
+      Name: "OpenVpnEC2InstanceProfile"
+  OpenVpnEC2InstanceRoleArn:
+    Description: Open Vpn EC2 Instance Role
+    Value: !GetAtt OpenVpnEC2InstanceRole.Arn
+    Export:
+      Name: "OpenVpnEC2InstanceRoleArn"
+  OpenVpnRouteTable:
+    Description: Open Vpn Vpc Route Table
+    Value: !Ref OpenVpnRouteTablePublic
+    Export:
+      Name: "OpenVpnRouteTablePublic"  
