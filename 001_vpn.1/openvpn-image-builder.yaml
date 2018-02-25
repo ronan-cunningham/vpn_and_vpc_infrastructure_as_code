@@ -1,20 +1,20 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: OpenVPN Stack
+Description: OpenVpn Stack
 
 Parameters:
-  OpenVPNPort:
+  OpenVpnPort:
     Type: Number
     Default: 1194
-    Description: OpenVPN UDP port
+    Description: OpenVpn UDP port
   SSHKeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Default: MyImac
-    Description: SSH Key for the OpenVPN Instance
+    Description: SSH Key for the OpenVpn Instance
     ConstraintDescription: Must be the name of an existing EC2 KeyPair.
-  OpenVPNInstanceType:
+  OpenVpnInstanceType:
     Type: String
     Default: t2.micro
-    Description: OpenVPN Instance Type
+    Description: OpenVpn Instance Type
 
 ##
 ## Fn::ImportValue:
@@ -34,7 +34,7 @@ Resources:
   myEIP:
     Type: "AWS::EC2::EIP"
     Properties:
-      Domain: !ImportValue OpenVPNVPC
+      Domain: !ImportValue OpenVpnVpc
 
   AssociateEIPtoNIC:
     Type: AWS::EC2::EIPAssociation
@@ -44,17 +44,17 @@ Resources:
   myNic:
     Type: AWS::EC2::NetworkInterface
     Properties:
-      SubnetId: !ImportValue OpenVPNPublicSubnetA
+      SubnetId: !ImportValue OpenVpnPublicSubnetA
       Description: Network Interface for OpenVpn Server Image Builder
       GroupSet:
-      - !ImportValue OpenVPNInstanceSG
+      - !ImportValue OpenVpnInstanceSG
       SourceDestCheck: true
 
-  EC2OpenVPNInstance:
+  EC2OpenVpnInstance:
     Type: "AWS::EC2::Instance"
     Properties:
       ImageId: !FindInMap [RegionMap, !Ref "AWS::Region", AMALINUX]
-      InstanceType: !Ref OpenVPNInstanceType
+      InstanceType: !Ref OpenVpnInstanceType
       SourceDestCheck: false
       KeyName: !Ref SSHKeyName
       NetworkInterfaces:
@@ -65,15 +65,15 @@ Resources:
       Tags:
         -
           Key: Name
-          Value: OpenVPN Image Build Server
+          Value: OpenVpn Image Build Server
       UserData:
           "Fn::Base64":
             !Sub |
               #!/bin/bash
               yum update -y aws-cfn-bootstrap
               yum -y update
-              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVPNInstance --configsets easyrsa --region ${AWS::Region}
-              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2OpenVPNInstance --region ${AWS::Region}
+              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVpnInstance --configsets easyrsa --region ${AWS::Region}
+              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2OpenVpnInstance --region ${AWS::Region}
 
     CreationPolicy:
       ResourceSignal:
@@ -95,8 +95,8 @@ Resources:
               content: !Sub |
                 [cfn-auto-reloader-hook]
                 triggers=post.update
-                path=Resources.EC2OpenVPNInstance.Metadata.AWS::CloudFormation::Init
-                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVPNInstance --configsets easyrsa --region ${AWS::Region}
+                path=Resources.EC2OpenVpnInstance.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVpnInstance --configsets easyrsa --region ${AWS::Region}
               mode: "000400"
               owner: root
               group: root
@@ -126,10 +126,10 @@ Resources:
             02_install_software_install_easyrsa:
               cwd: "/tmp"
               command: "yum --nogpgcheck localinstall -y easy-rsa-2.2.2-1.el5.noarch.rpm"
-            03_install_software_download_openvpn:
+            03_install_software_download_OpenVpn:
               cwd: "/tmp"
               command: "curl -O https://rpmfind.net/linux/dag/redhat/el6/en/x86_64/dag/RPMS/openvpn-2.2.2-1.el6.rf.x86_64.rpm"
-            04_install_software_install_openvpn:
+            04_install_software_install_OpenVpn:
               cwd: "/tmp"
               command: "yum --nogpgcheck localinstall -y openvpn-2.2.2-1.el6.rf.x86_64.rpm"
             05_install_software_copy_easyrsa:
@@ -169,12 +169,12 @@ Resources:
 
         generate_client:
           files:
-            /opt/easy-rsa/openvpn_client.conf:
+            /opt/easy-rsa/OpenVpn_client.conf:
               content:
                Fn::Sub:
                  - |
                    client
-                   port ${OpenVPNPort}
+                   port ${OpenVpnPort}
                    dev tun
                    proto udp
                    tls-client
@@ -191,7 +191,7 @@ Resources:
                    ns-cert-type server
                    comp-lzo
                    verb 3
-                   remote ${EIP} ${OpenVPNPort}
+                   remote ${EIP} ${OpenVpnPort}
                  - { EIP: !ImportValue OpenVpnVpcElasticIP
                    }
               mode: "000700"
@@ -231,7 +231,7 @@ Resources:
           files:
             /opt/openvpn/server.conf:
               content: !Sub |
-                port ${OpenVPNPort}
+                port ${OpenVpnPort}
                 mode server
                 tls-server
                 proto udp
@@ -256,7 +256,6 @@ Resources:
                 max-clients 100
                 user nobody
                 group nobody
-                crl-verify /etc/openvpn/keys/crl.pem
               mode: "000644"
               owner: "root"
               group: "root"
@@ -270,22 +269,22 @@ Resources:
               command: "iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE"
             04_configure_server_update_config:
               command: "cp -rf /opt/openvpn/server.conf /etc/openvpn/server.conf"
-            05_configure_server_openvpn_start:
+            05_configure_server_OpenVpn_start:
               command: "service openvpn start"
-            06_configure_server_openvpn_startup:
+            06_configure_server_OpenVpn_startup:
               command: "chkconfig --level 35 openvpn on"
 
         upload_files:
           commands:
             01_upload_files_zipfiles:
                 cwd: "/opt/easy-rsa/keys"
-                command: "zip openVPNClientFiles.zip ca.crt statictlssecret.key clientuser.key clientuser.crt openvpn_clientuser.ovpn"
-            02_upload_files_s3cp_openVPNClientFiles:
+                command: "zip OpenVpnClientFiles.zip ca.crt statictlssecret.key clientuser.key clientuser.crt openvpn_clientuser.ovpn"
+            02_upload_files_s3cp_OpenVpnClientFiles:
               cwd: "/opt/easy-rsa/keys"
               command:
                 Fn::Sub:
                   - |
-                    aws s3 cp openVPNClientFiles.zip s3://${S3Bucket}/client/openVPNClientFiles.zip
+                    aws s3 cp OpenVpnClientFiles.zip s3://${S3Bucket}/client/OpenVpnClientFiles.zip
                   - {
                      S3Bucket: !ImportValue OpenVpnConfigDownloadBucket
                     }

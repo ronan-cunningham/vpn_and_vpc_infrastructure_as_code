@@ -49,7 +49,7 @@ Parameters:
 
 Resources:
 
-  OpenVpnVPC:
+  OpenVpnVpc:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: !Ref OpenVpnVpcCidrBlock
@@ -68,7 +68,7 @@ Resources:
       AvailabilityZone: !Sub ${AWS::Region}a
       CidrBlock: !Ref PubSubACidrBlock
       MapPublicIpOnLaunch: 'false'
-      VpcId: !Ref OpenVpnVPC
+      VpcId: !Ref OpenVpnVpc
       Tags:
       - Key: Name
         Value: VpnPublicSubnetA
@@ -81,7 +81,7 @@ Resources:
       AvailabilityZone: !Sub ${AWS::Region}b
       CidrBlock: !Ref PubSubBCidrBlock
       MapPublicIpOnLaunch: 'false'
-      VpcId: !Ref OpenVpnVPC
+      VpcId: !Ref OpenVpnVpc
       Tags:
       - Key: Name
         Value: VpnPublicSubnetB
@@ -100,7 +100,7 @@ Resources:
   OpenVpnRouteTablePublic:
       Type: "AWS::EC2::RouteTable"
       Properties:
-        VpcId: !Ref OpenVpnVPC
+        VpcId: !Ref OpenVpnVpc
         Tags:
         - Key: Name
           Value: VpnVpcPubRouteTable
@@ -110,7 +110,7 @@ Resources:
   AttachInternetGateway:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      VpcId: !Ref OpenVpnVPC
+      VpcId: !Ref OpenVpnVpc
       InternetGatewayId: !Ref OpenVpnInternetGateway
 
   RouteDefaultPublic:
@@ -138,7 +138,7 @@ Resources:
     Properties:
       GroupDescription: SG for OpenVpn Server
       GroupName: OpenVpnServerSG
-      VpcId: !Ref OpenVpnVPC
+      VpcId: !Ref OpenVpnVpc
       SecurityGroupIngress:
       - IpProtocol: "-1"
         FromPort: '0'
@@ -174,12 +174,12 @@ Resources:
       RouteTableIds:
         - !Ref OpenVpnRouteTablePublic
       ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
-      VpcId: !Ref OpenVpnVPC
+      VpcId: !Ref OpenVpnVpc
 
   OpenVpnVpcElasticIP:
     Type: "AWS::EC2::EIP"
     Properties:
-      Domain: !Ref OpenVpnVPC
+      Domain: !Ref OpenVpnVpc
       
   OpenVpnEC2InstanceRole:
     Type: AWS::IAM::Role
@@ -290,7 +290,7 @@ Resources:
   EFSMountTargetSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      VpcId: !Ref OpenVpnVPC
+      VpcId: !Ref OpenVpnVpc
       GroupDescription: Security group for mount target
       Tags:
         - Key: Name
@@ -319,7 +319,134 @@ Resources:
       SecurityGroups:
        - !Ref EFSMountTargetSecurityGroup
       
+  EmptyS3BucketExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
 
+  EmptyS3BucketExecutionPolicy:
+    DependsOn:
+    - EmptyS3BucketExecutionRole
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: EmptyS3BucketLogsRolePolicy
+      Roles:
+      - Ref: EmptyS3BucketExecutionRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - logs:*
+          Resource:
+          - arn:aws:logs:*:*:*
+        - Effect: Allow
+          Action:
+          - s3:*
+          Resource:
+          - "*"
+
+  EmptyS3BucketLambda:
+    Type: AWS::Lambda::Function
+    DependsOn:
+    - EmptyS3BucketExecutionRole
+    - EmptyS3BucketExecutionPolicy
+    Properties:
+      Timeout: 60
+      Handler: index.handler
+      Runtime: "nodejs6.10"
+      MemorySize: 128
+      Code:
+        ZipFile: !Sub |
+          'use strict';
+
+          exports.handler = (event, context) => {
+              console.log(JSON.stringify(event));
+
+              var responseObject = {};
+              responseObject.event = event;
+              responseObject.context = context;
+
+              if (event.RequestType == "Delete") {
+                  console.log("Handle Delete Event");
+                  var AWS = require('aws-sdk');
+                  var s3Client = new AWS.S3();
+                  clearBucket(s3Client, event.ResourceProperties.S3BucketName, responseObject);
+              } else {
+                  console.log("Handle Create Event");
+                  sendResponse(responseObject);
+              }
+          };
+
+          function sendResponse(responseObject) {
+              var cfnResponse = require('cfn-response');
+              cfnResponse.send(responseObject.event, responseObject.context, cfnResponse.SUCCESS);
+          }
+
+          function deleteBucket(s3Client, bucket, responseObject) {
+              s3Client.deleteBucket({
+                  Bucket: bucket
+              }, function(err, data) {
+                  if (err) {
+                      console.log(err, err.stack);
+                  } else {
+                      console.log(data);
+                  }
+                  sendResponse(responseObject);
+              });
+          }
+
+          function clearBucket(s3Client, bucket, responseObject) {
+              s3Client.listObjects({
+                  Bucket: bucket
+              }, function(err, data) {
+                  if (err) {
+                      console.log("error listing bucket objects " + err);
+                      return;
+                  }
+                  var items = data.Contents;
+                  for (var i = 0; i < items.length; i += 1) {
+                      var deleteParams = {
+                          Bucket: bucket,
+                          Key: items[i].Key
+                      };
+                      deleteObject(s3Client, deleteParams);
+                  }
+              });
+              setTimeout(function() {
+                  deleteBucket(s3Client, bucket, responseObject);
+              }, 10000);
+          }
+
+          function deleteObject(s3Client, deleteParams) {
+              s3Client.deleteObject(deleteParams, function(err, data) {
+                  if (err) {
+                      console.log("Error Deleting Object: " + deleteParams.Key);
+                  } else {
+                    console.log("Deleted Object: " + deleteParams.Key);
+                  }
+              });
+          }
+      Role: !GetAtt EmptyS3BucketExecutionRole.Arn
+
+  EmptyS3BucketAction:
+    Type: Custom::EmptyS3BucketAction
+    Properties:
+      ServiceToken: !GetAtt EmptyS3BucketLambda.Arn
+      Region: !Ref "AWS::Region"
+      S3BucketName: !Ref OpenVpnConfigDownloadBucket
+      
+      
+      
 Outputs:
   EfsMountTargetOpenVpnPublicSubnetA:
     Description: Efs Mount Target OpenVpn Public SubnetA
@@ -331,11 +458,11 @@ Outputs:
     Value: !Ref EfsMountTargetOpenVpnPublicSubnetB
     Export:
       Name: !Sub "EfsMountTargetOpenVpnPublicSubnetB"
-  OpenVpnVPC:
-    Description: Open VPN VPC
-    Value: !Ref OpenVpnVPC
+  OpenVpnVpc:
+    Description: Open VPN Vpc
+    Value: !Ref OpenVpnVpc
     Export:
-      Name: !Sub "OpenVpnVPC"
+      Name: !Sub "OpenVpnVpc"
   OpenVpnPublicSubnetA:
     Description: Open VPN Public Subnet A
     Value: !Ref OpenVpnPublicSubnetA
