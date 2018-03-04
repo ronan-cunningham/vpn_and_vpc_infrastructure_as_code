@@ -87,7 +87,6 @@ Resources:
       ResourceSignal:
         Count: "1"
         Timeout: PT10M
-
     Metadata:
       AWS::CloudFormation::Init:
         configSets:
@@ -208,7 +207,7 @@ Resources:
               group: root
             /etc/openvpn/gen_ovpn_profile.sh:
               content: !Sub |
-                (cat /etc/openvpn/OpenVpn_client.conf
+                (cat /etc/openvpn/OpenVpn_clientuser_client.conf
                 echo '<key>'
                 cat keys/clientuser.key
                 echo '</key>'
@@ -218,7 +217,33 @@ Resources:
                 echo '<ca>'
                 cat keys/ca.crt
                 echo '</ca>'
-                ) > /etc/openvpn/openvpn_clientuser.ovpn
+                ) > /etc/openvpn/keys/openvpn_clientuser.ovpn
+              mode: "000700"
+              owner: root
+              group: root
+            /etc/openvpn/add_user.sh:
+              content: 
+                #!/bin/bash -x \n
+                S3Bucket=${2} \n
+                cd /etc/openvpn \n
+                source /etc/openvpn/vars;/etc/openvpn/build-key ${1} \n
+                cp /etc/openvpn/gen_ovpn_profile.sh /etc/openvpn/gen_ovpn_${1}_profile.sh \n
+                sed -i "s/clientuser/${1}/g" /etc/openvpn/gen_ovpn_${1}_profile.sh \n
+                cp /etc/openvpn/OpenVpn_client.conf /etc/openvpn/OpenVpn_${1}_client.conf \n
+                sed -i "s/clientuser/${1}/g" /etc/openvpn/OpenVpn_${1}_client.conf \n
+                bash /etc/openvpn/gen_ovpn_${1}_profile.sh ${1} \n
+                cd /etc/openvpn/keys \n
+                zip ${1}.zip ca.crt statictlssecret.key ${1}.key ${1}.crt openvpn_${1}.ovpn \n
+                zip ${1}.zip ca.crt statictlssecret.key ${1}.key ${1}.crt openvpn_${1}.ovpn \n
+                aws s3 cp ${1}.zip s3://${S3Bucket}/client/${1}.zip \n
+              mode: "000700"
+              owner: root
+              group: root
+            /etc/openvpn/revoke_user.sh:
+              content: 
+                #!/bin/bash -x \n
+                cd /etc/openvpn \n
+                source /etc/openvpn/vars \n
               mode: "000700"
               owner: root
               group: root
@@ -228,14 +253,6 @@ Resources:
               test: "test -e /etc/openvpn/build-key"
               command: !Sub |
                 sed -i 's/--interact//g' /etc/openvpn/build-key
-            02_generate_client_run_build-key:
-              cwd: "/etc/easy-rsa"
-              test: "test -e /etc/openvpn/build-key"
-              command: "source /etc/openvpn/vars;/etc/openvpn/build-key clientuser"
-            03_generate_client_generate_ovpn_profile:
-              cwd: "/etc/easy-rsa"
-              test: "test -e /etc/openvpn/gen_ovpn_profile.sh"
-              command: "/etc/openvpn/gen_ovpn_profile.sh"
         configure_server:
           files:
             /opt/openvpn/server.conf:
@@ -272,32 +289,9 @@ Resources:
             01_configure_server_sysctl_ipforward:
               command: !Sub |
                 sed -i 's/net.ipv4.ip_forward.=.0/net.ipv4.ip_forward = 1/' /etc/sysctl.conf
-            02_configure_server_sysctl_reload:
-              command: "sysctl -p"
-            03_configure_server_iptables_nat:
-              command: "iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE"
-            04_configure_server_update_config:
-              command: "cp -rf /opt/openvpn/server.conf /etc/openvpn/server.conf"
-            05_configure_server_OpenVpn_start:
-              command: "service openvpn start"
-            06_configure_server_OpenVpn_startup:
-              command: "chkconfig --level 35 openvpn on"
-
         upload_files:
           commands:
-            01_upload_files_zipfiles:
-                cwd: "/etc/openvpn/keys"
-                command: "zip OpenVpnClientFiles.zip ca.crt statictlssecret.key clientuser.key clientuser.crt openvpn_clientuser.ovpn"
-            02_upload_files_s3cp_OpenVpnClientFiles:
-              cwd: "/etc/openvpn/keys"
-              command:
-                Fn::Sub:
-                  - |
-                    aws s3 cp OpenVpnClientFiles.zip s3://${S3Bucket}/client/OpenVpnClientFiles.zip
-                  - {
-                     S3Bucket: !ImportValue OpenVpnVpcConfigDownloadBucket
-                    }
-            03_upload_files_s3cp_cfn_init_log:
+            01_upload_files_s3cp_cfn_init_log:
               cwd: "/var/log"
               test: "test -e /var/log/cfn-init.log"
               command:

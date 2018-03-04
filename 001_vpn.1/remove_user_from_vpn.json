@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Command Document Example JSON Template",
+  "parameters": {
+    "User": {
+      "type": "String",
+      "description": "Add User to VPN"
+    }
+  },
+  "mainSteps": [{
+    "action": "aws:runShellScript",
+    "name": "RemoveUserFromVPN",
+    "inputs": {
+      "runCommand": [
+        "cd /etc/openvpn;source /etc/openvpn/vars;./revoke-full {{User}}"
+      ]
+    }
+  }]
+}
