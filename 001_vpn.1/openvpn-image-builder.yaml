@@ -44,10 +44,10 @@ Resources:
   myNic:
     Type: AWS::EC2::NetworkInterface
     Properties:
-      SubnetId: !ImportValue OpenVpnPublicSubnetA
+      SubnetId: !ImportValue OpenVpnVpcPublicSubnetA
       Description: Network Interface for OpenVpn Server Image Builder
       GroupSet:
-      - !ImportValue OpenVpnInstanceSG
+      - !ImportValue OpenVpnVpcInstanceSG
       SourceDestCheck: true
 
   EC2OpenVpnInstance:
@@ -68,17 +68,26 @@ Resources:
           Value: OpenVpn Image Build Server
       UserData:
           "Fn::Base64":
-            !Sub |
-              #!/bin/bash
-              yum update -y aws-cfn-bootstrap
-              yum -y update
-              /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVpnInstance --configsets easyrsa --region ${AWS::Region}
-              /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2OpenVpnInstance --region ${AWS::Region}
-
+                Fn::Sub:
+                  - |
+                    #!/bin/bash
+                    yum update -y aws-cfn-bootstrap
+                    yum install -y nfs-utils
+                    yum -y update
+                    mkdir -p /etc/openvpn
+                    mkdir -p /opt/openvpn
+                    mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${ElasticFS}.efs.${AWS::Region}.amazonaws.com:/ /etc/openvpn
+                    rm -rf /etc/openvpn/*
+                    /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVpnInstance --configsets easyrsa --region ${AWS::Region}
+                    /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2OpenVpnInstance --region ${AWS::Region}                
+                  - {
+                     ElasticFS: !ImportValue OpenVpnVpcEFS
+                    }
     CreationPolicy:
       ResourceSignal:
         Count: "1"
         Timeout: PT10M
+
     Metadata:
       AWS::CloudFormation::Init:
         configSets:
@@ -133,43 +142,43 @@ Resources:
               cwd: "/tmp"
               command: "yum --nogpgcheck localinstall -y openvpn-2.2.2-1.el6.rf.x86_64.rpm"
             05_install_software_copy_easyrsa:
-              command: "cp -R /usr/share/easy-rsa/2.0 /opt/easy-rsa"
+              command: "cp -R /usr/share/easy-rsa/2.0/* /etc/openvpn"
             
         generate_secrets:
           commands:
             01_generate_secrets_clean_keysdir:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/clean-all"
-              command: "source /opt/easy-rsa/vars;/opt/easy-rsa/clean-all"
+              cwd: "/etc/openvpn"
+              test: "test -e /etc/openvpn/clean-all"
+              command: "source /etc/openvpn/vars;/etc/openvpn/clean-all"
             02_generate_secrets_update_build-ca:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/build-ca"
+              cwd: "/etc/openvpn"
+              test: "test -e /etc/openvpn/build-ca"
               command: !Sub |
-                sed -i 's/--interact//g' /opt/easy-rsa/build-ca
+                sed -i 's/--interact//g' /etc/openvpn/build-ca
             03_generate_secrets_run_build-ca:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/build-ca"
-              command: "source /opt/easy-rsa/vars;/opt/easy-rsa/build-ca"
+              cwd: "/etc/openvpn"
+              test: "test -e /etc/openvpn/build-ca"
+              command: "source /etc/openvpn/vars;/etc/openvpn/build-ca"
             04_generate_secrets_run_build-dh:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/build-dh"
-              command: "source /opt/easy-rsa/vars;/opt/easy-rsa/build-dh"
+              cwd: "/etc/openvpn"
+              test: "test -e /etc/openvpn/build-dh"
+              command: "source /etc/openvpn/vars;/etc/openvpn/build-dh"
             05_generate_secrets_update_build-key-server:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/build-key-server"
+              cwd: "/etc/openvpn"
+              test: "test -e /etc/openvpn/build-key-server"
               command: !Sub |
-                sed -i 's/--interact//g' /opt/easy-rsa/build-key-server
+                sed -i 's/--interact//g' /etc/openvpn/build-key-server
             06_generate_secrets_run_build-key-server:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/build-key-server"
-              command: "source /opt/easy-rsa/vars;/opt/easy-rsa/build-key-server server"
+              cwd: "/etc/openvpn"
+              test: "test -e /etc/openvpn/build-key-server"
+              command: "source /etc/openvpn/vars;/etc/openvpn/build-key-server server"
             07_generate_secrets_statictlssecret:
-              cwd: "/opt/easy-rsa/keys"
-              command: "openvpn --genkey --secret statictlssecret.key"
+              cwd: "/etc/openvpn/keys"
+              command: "openvpn --genkey --secret statictlssecret.key"     
 
         generate_client:
           files:
-            /opt/easy-rsa/OpenVpn_client.conf:
+            /etc/openvpn/OpenVpn_client.conf:
               content:
                Fn::Sub:
                  - |
@@ -197,9 +206,9 @@ Resources:
               mode: "000700"
               owner: root
               group: root
-            /opt/easy-rsa/gen_ovpn_profile.sh:
+            /etc/openvpn/gen_ovpn_profile.sh:
               content: !Sub |
-                (cat /opt/easy-rsa/openvpn_client.conf
+                (cat /etc/openvpn/OpenVpn_client.conf
                 echo '<key>'
                 cat keys/clientuser.key
                 echo '</key>'
@@ -209,24 +218,24 @@ Resources:
                 echo '<ca>'
                 cat keys/ca.crt
                 echo '</ca>'
-                ) > /opt/easy-rsa/keys/openvpn_clientuser.ovpn
+                ) > /etc/openvpn/openvpn_clientuser.ovpn
               mode: "000700"
               owner: root
               group: root
           commands:
             01_generate_client_update_build-key:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/build-key"
+              cwd: "/etc/openvpn"
+              test: "test -e /etc/openvpn/build-key"
               command: !Sub |
-                sed -i 's/--interact//g' /opt/easy-rsa/build-key
+                sed -i 's/--interact//g' /etc/openvpn/build-key
             02_generate_client_run_build-key:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/build-key"
-              command: "source /opt/easy-rsa/vars;/opt/easy-rsa/build-key clientuser"
+              cwd: "/etc/easy-rsa"
+              test: "test -e /etc/openvpn/build-key"
+              command: "source /etc/openvpn/vars;/etc/openvpn/build-key clientuser"
             03_generate_client_generate_ovpn_profile:
-              cwd: "/opt/easy-rsa"
-              test: "test -e /opt/easy-rsa/gen_ovpn_profile.sh"
-              command: "/opt/easy-rsa/gen_ovpn_profile.sh"
+              cwd: "/etc/easy-rsa"
+              test: "test -e /etc/openvpn/gen_ovpn_profile.sh"
+              command: "/etc/openvpn/gen_ovpn_profile.sh"
         configure_server:
           files:
             /opt/openvpn/server.conf:
@@ -237,12 +246,12 @@ Resources:
                 proto udp
                 dev tun
                 server 172.16.0.0 255.255.252.0
-                ca /opt/easy-rsa/keys/ca.crt
-                cert /opt/easy-rsa/keys/server.crt
-                key /opt/easy-rsa/keys/server.key
-                dh /opt/easy-rsa/keys/dh2048.pem
+                ca /etc/openvpn/keys/ca.crt
+                cert /etc/openvpn/keys/server.crt
+                key /etc/openvpn/keys/server.key
+                dh /etc/openvpn/keys/dh2048.pem
                 push "route 10.0.0.0 255.255.255.0"
-                tls-auth /opt/easy-rsa/keys/statictlssecret.key 0
+                tls-auth /etc/openvpn/keys/statictlssecret.key 0
                 cipher AES-256-CBC
                 ifconfig-pool-persist ipp.txt
                 keepalive 10 120
@@ -277,16 +286,16 @@ Resources:
         upload_files:
           commands:
             01_upload_files_zipfiles:
-                cwd: "/opt/easy-rsa/keys"
+                cwd: "/etc/openvpn/keys"
                 command: "zip OpenVpnClientFiles.zip ca.crt statictlssecret.key clientuser.key clientuser.crt openvpn_clientuser.ovpn"
             02_upload_files_s3cp_OpenVpnClientFiles:
-              cwd: "/opt/easy-rsa/keys"
+              cwd: "/etc/openvpn/keys"
               command:
                 Fn::Sub:
                   - |
                     aws s3 cp OpenVpnClientFiles.zip s3://${S3Bucket}/client/OpenVpnClientFiles.zip
                   - {
-                     S3Bucket: !ImportValue OpenVpnConfigDownloadBucket
+                     S3Bucket: !ImportValue OpenVpnVpcConfigDownloadBucket
                     }
             03_upload_files_s3cp_cfn_init_log:
               cwd: "/var/log"
@@ -296,5 +305,5 @@ Resources:
                   - |
                     aws s3 cp /var/log/cfn-init.log s3://${S3Bucket}/log/genSecrets_cfn-init.log
                   - {
-                     S3Bucket: !ImportValue OpenVpnConfigDownloadBucket
+                     S3Bucket: !ImportValue OpenVpnVpcConfigDownloadBucket
                     }

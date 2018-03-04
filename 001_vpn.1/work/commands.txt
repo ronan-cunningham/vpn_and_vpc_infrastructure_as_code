@@ -6,6 +6,7 @@ aws cloudformation  create-stack --stack-name DevVpcPrivateNACL --template-body 
 aws cloudformation  create-stack --stack-name DevVpcPublicNACL --template-body file://dev-vpc-public-nacl.yaml --capabilities CAPABILITY_NAMED_IAM
 aws cloudformation  create-stack --stack-name OpenVpnImageBuilder --template-body file://openvpn-image-builder.yaml --capabilities CAPABILITY_IAM
 aws cloudformation  create-stack --stack-name OpenVpnAsg --template-body file://openvpn-asg.yaml --capabilities CAPABILITY_IAM
+https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/quickref-efs.html
 
 
 
