@@ -5,7 +5,7 @@ Parameters:
   AMI:
     Description: AMI of OpenVPN Server
     Type: String
-    Default: ami-8b8b68f6
+    Default: ami-9f9f60e2
     Description: SSH Key for the OpenVPN Instance
   SSHKeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -103,7 +103,7 @@ Resources:
 
                  - { EIP: !ImportValue OpenVpnVpcElasticIP
                    }      
-      Role: !ImportValue OpenVpnEC2InstanceRoleArn
+      Role: !ImportValue OpenVpnVpcEC2InstanceRoleArn
       
   SubscribeLambdaToTopic:
     Type: "AWS::SNS::Subscription"
@@ -127,24 +127,94 @@ Resources:
       IamInstanceProfile: !ImportValue OpenVpnEC2InstanceProfile
       ImageId: !Ref AMI
       SecurityGroups:
-        - !ImportValue OpenVPNInstanceSG
+        - !ImportValue OpenVpnVpcInstanceSG
       InstanceType: !Ref OpenVPNInstanceType
       UserData:
           "Fn::Base64":
-            !Sub |
-              #!/bin/bash
-              sysctl -p
-              yum -y update
-              iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
-              service openvpn stop
-              service openvpn start
+                Fn::Sub:
+                  - |
+                    #!/bin/bash
+                    yum update -y aws-cfn-bootstrap
+                    yum install -y nfs-utils
+                    yum -y update
+                    mkdir -p /etc/openvpn
+                    mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${ElasticFS}.efs.${AWS::Region}.amazonaws.com:/ /etc/openvpn
+                    iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
+                    sysctl -p
+                    service openvpn start
+                    chkconfig --level 35 openvpn on
+                    /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVpnInstance --configsets easyrsa --region ${AWS::Region}
+                    /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2OpenVpnInstance --region ${AWS::Region}                
+                  - {
+                     ElasticFS: !ImportValue OpenVpnVpcEFS
+                    }
+    CreationPolicy:
+      ResourceSignal:
+        Count: "1"
+        Timeout: PT10M
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          easyrsa:
+            - "configure_cfn"
+            - "configure_cron"
+        configure_cfn:
+          files:
+            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.EC2OpenVpnInstance.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2OpenVpnInstance --configsets easyrsa --region ${AWS::Region}
+              mode: "000400"
+              owner: root
+              group: root
+            /etc/cfn/cfn-hup.conf:
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+                verbose=true
+                interval=1
+              mode: "000400"
+              owner: root
+              group: root
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: "true"
+                ensureRunning: "true"
+                files:
+                  - "/etc/cfn/cfn-hup.conf"
+                  - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+        configure_cron:
+          files:
+            /root/crontab:
+              content:
+                Fn::Sub:
+                  - |
+                    @reboot mkdir -p /etc/openvpn
+                    @reboot mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2 ${ElasticFS}.efs.${AWS::Region}.amazonaws.com:/ /etc/openvpn
+                    @reboot iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
+                    @reboot sysctl -p
+                    @reboot touch /tmp/rebooted.txt
+                  - {
+                     ElasticFS: !ImportValue OpenVpnVpcEFS
+                    }
+              mode: "000700"
+              owner: root
+              group: root
+          commands:
+            01_install_software_download_easyrsa:
+              cwd: "/tmp"
+              command: "crontab -u root /root/crontab"
               
   OpenVPNServerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       VPCZoneIdentifier: 
-        - !ImportValue OpenVPNPublicSubnetA
-        - !ImportValue OpenVPNPublicSubnetB
+        - !ImportValue OpenVpnVpcPublicSubnetA
+        - !ImportValue OpenVpnVpcPublicSubnetB
       LaunchConfigurationName:
         Ref: OpenVPNServerLaunchConfig
       DesiredCapacity: '1'

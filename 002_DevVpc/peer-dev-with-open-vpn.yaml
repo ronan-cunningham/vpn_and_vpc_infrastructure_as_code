@@ -28,13 +28,13 @@ Resources:
         Value: devAndOpenVpnVpcPeering
       - Key: Stack
         Value: !Ref AWS::StackId
-      VpcId: !ImportValue OpenVPNVPC
+      VpcId: !ImportValue OpenVpnVpc
   RouteOpenVpnToDev:
     Type: "AWS::EC2::Route"
     Properties:
       DestinationCidrBlock: !Ref DevVPcCidrBlock
       VpcPeeringConnectionId: !Ref devAndOpenVpnVpcPeeringConnection
-      RouteTableId: !ImportValue OpenVPNRouteTablePublic
+      RouteTableId: !ImportValue OpenVpnVpcRouteTablePublic
   RouteDevPubToOpenVpn:
     Type: "AWS::EC2::Route"
     Properties:

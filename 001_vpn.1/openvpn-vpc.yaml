@@ -162,6 +162,7 @@ Resources:
     Type: AWS::S3::Bucket
     Properties:
       AccessControl: Private
+      BucketName: open-vpn-config-download
       VersioningConfiguration:
         Status: Enabled
       BucketEncryption:
@@ -319,6 +320,7 @@ Resources:
       SecurityGroups:
        - !Ref EFSMountTargetSecurityGroup
       
+  # The role which our Lambda function will assume when it executes
   EmptyS3BucketExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -333,6 +335,8 @@ Resources:
           - sts:AssumeRole
       Path: "/"
 
+  # The policy which will be attached to our Lambda execution role
+  # The Lambda function will need access to write output to CloudWatch Logs and full access to S3
   EmptyS3BucketExecutionPolicy:
     DependsOn:
     - EmptyS3BucketExecutionRole
@@ -355,6 +359,8 @@ Resources:
           Resource:
           - "*"
 
+  # This lambda function will empty and delete the S3 bucket which was created with our stack
+  # The function will be invoked on stack creation, update, and deletion events fired from CloudFormation
   EmptyS3BucketLambda:
     Type: AWS::Lambda::Function
     DependsOn:
@@ -368,14 +374,11 @@ Resources:
       Code:
         ZipFile: !Sub |
           'use strict';
-
           exports.handler = (event, context) => {
               console.log(JSON.stringify(event));
-
               var responseObject = {};
               responseObject.event = event;
               responseObject.context = context;
-
               if (event.RequestType == "Delete") {
                   console.log("Handle Delete Event");
                   var AWS = require('aws-sdk');
@@ -386,12 +389,10 @@ Resources:
                   sendResponse(responseObject);
               }
           };
-
           function sendResponse(responseObject) {
               var cfnResponse = require('cfn-response');
               cfnResponse.send(responseObject.event, responseObject.context, cfnResponse.SUCCESS);
           }
-
           function deleteBucket(s3Client, bucket, responseObject) {
               s3Client.deleteBucket({
                   Bucket: bucket
@@ -404,7 +405,6 @@ Resources:
                   sendResponse(responseObject);
               });
           }
-
           function clearBucket(s3Client, bucket, responseObject) {
               s3Client.listObjects({
                   Bucket: bucket
@@ -426,7 +426,6 @@ Resources:
                   deleteBucket(s3Client, bucket, responseObject);
               }, 10000);
           }
-
           function deleteObject(s3Client, deleteParams) {
               s3Client.deleteObject(deleteParams, function(err, data) {
                   if (err) {
@@ -438,13 +437,14 @@ Resources:
           }
       Role: !GetAtt EmptyS3BucketExecutionRole.Arn
 
+  # Custom resource for the EmptyS3BucketLambda lambda function
+  # CloudFormation will wait for the associated lambda function to signal back with cfn-response
   EmptyS3BucketAction:
     Type: Custom::EmptyS3BucketAction
     Properties:
       ServiceToken: !GetAtt EmptyS3BucketLambda.Arn
       Region: !Ref "AWS::Region"
       S3BucketName: !Ref OpenVpnVpcConfigDownloadBucket
-      
       
       
 Outputs:

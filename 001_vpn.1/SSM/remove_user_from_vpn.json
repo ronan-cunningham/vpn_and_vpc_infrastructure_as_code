@@ -4,7 +4,7 @@
   "parameters": {
     "User": {
       "type": "String",
-      "description": "Add User to VPN"
+      "description": "Remove User from VPN"
     }
   },
   "mainSteps": [{
@@ -12,7 +12,8 @@
     "name": "RemoveUserFromVPN",
     "inputs": {
       "runCommand": [
-        "cd /etc/openvpn;source /etc/openvpn/vars;./revoke-full {{User}}"
+        "cd /etc/openvpn;source /etc/openvpn/vars;./revoke-full {{User}}",
+        "/bin/cp -rf /etc/openvpn/keys/crl.pem /etc/openvpn/"
       ]
     }
   }]
