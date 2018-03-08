@@ -5,7 +5,7 @@ Parameters:
   AMI:
     Description: AMI of OpenVPN Server
     Type: String
-    Default: ami-9f9f60e2
+    Default: ami-cfb54cb2
     Description: SSH Key for the OpenVPN Instance
   SSHKeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -129,82 +129,6 @@ Resources:
       SecurityGroups:
         - !ImportValue OpenVpnVpcInstanceSG
       InstanceType: !Ref OpenVPNInstanceType
-    CreationPolicy:
-      ResourceSignal:
-        Count: "1"
-        Timeout: PT10M
-    Metadata:
-      AWS::CloudFormation::Init:
-        configSets:
-          openvpn:
-            - "configure_cfn"
-        configure_cfn:
-          files:
-            /home/ec2-user/crontab:
-              content:
-               Fn::Sub:
-                 - |
-                   @reboot sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
-                   @reboot sudo sysctl -p
-                   @reboot sudo service openvpn start
-                   @reboot sudo chkconfig openvpn on
-                   @reboot sudo touch /tmp/rebooteda.txt
-                 - { ElasticFS: !ImportValue OpenVpnVpcEFS
-                   }
-              mode: "000700"
-              owner: ec2-user
-            /etc/cfn/hooks.d/cfn-auto-reloader.conf:
-              content: !Sub |
-                [cfn-auto-reloader-hook]
-                triggers=post.update
-                path=Resources.EC2OpenVpnInstance.Metadata.AWS::CloudFormation::Init
-                action=/opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource OpenVPNServerLaunchConfig  --configsets openvpn --region ${AWS::Region}
-              mode: "000400"
-              owner: root
-              group: root
-            /etc/cfn/cfn-hup.conf:
-              content: !Sub |
-                [main]
-                stack=${AWS::StackId}
-                region=${AWS::Region}
-                verbose=true
-                interval=1
-              mode: "000400"
-              owner: root
-              group: root
-          services:
-            sysvinit:
-              cfn-hup:
-                enabled: "true"
-                ensureRunning: "true"
-                files:
-                  - "/etc/cfn/cfn-hup.conf"
-                  - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
-          commands:
-            01_generate_client_update_build-key:
-              cwd: "/tmp"
-              command: 'touch /tmp/testing123'
-      UserData:
-          "Fn::Base64":
-                Fn::Sub:
-                  - |
-                    #!/bin/bash
-                    yum update -y aws-cfn-bootstrap
-                    yum install -y nfs-utils
-                    yum -y update
-                    mkdir -p /etc/openvpn
-                    echo "${ElasticFS}.efs.${AWS::Region}.amazonaws.com:/ /etc/openvpn nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,_netdev 0 0" >> /etc/fstab
-                    mount -a -t nfs4
-                    iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
-                    sysctl -p
-                    service openvpn start
-                    chkconfig openvpn on
-                    /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource OpenVPNServerLaunchConfig --configsets openvpn --region ${AWS::Region}
-                    crontab -u ec2-user /home/ec2-user/crontab
-                    /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource OpenVPNServerAutoScalingGroup --region ${AWS::Region}                
-                  - {
-                     ElasticFS: !ImportValue OpenVpnVpcEFS
-                    }
               
   OpenVPNServerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup

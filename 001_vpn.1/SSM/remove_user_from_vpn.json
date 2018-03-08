@@ -13,7 +13,10 @@
     "inputs": {
       "runCommand": [
         "cd /etc/openvpn;source /etc/openvpn/vars;./revoke-full {{User}}",
-        "/bin/cp -rf /etc/openvpn/keys/crl.pem /etc/openvpn/"
+        "/bin/cp -rf /etc/openvpn/keys/crl.pem /etc/openvpn/",
+        "sed -i 's/#crl/crl/g' /etc/openvpn/server.conf",
+        "service openvpn stop",
+        "service openvpn start"
       ]
     }
   }]

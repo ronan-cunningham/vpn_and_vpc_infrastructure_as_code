@@ -256,7 +256,7 @@ Resources:
                 max-clients 100
                 user nobody
                 group nobody
-                crl-verify /etc/openvpn/crl.pem
+                #crl-verify /etc/openvpn/crl.pem
               mode: "000644"
               owner: "root"
               group: "root"
