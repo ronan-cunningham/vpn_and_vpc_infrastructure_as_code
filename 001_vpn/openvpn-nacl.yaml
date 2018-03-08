@@ -33,8 +33,8 @@ Resources:
 # HOME NETWORK
 #
         
-# Allows inbound SSH traffic to the subnet from your home network.
-  SshInFromHomeNetwork:
+# Allows inbound SSH traffic to the subnet from Internet.
+  SshInFromInternet:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       NetworkAclId: !Ref OpenVpnVpcNACL
@@ -46,8 +46,8 @@ Resources:
         From: '22'
         To: '22'      
         
-# Allows inbound UDP traffic to the subnet from your home network.
-  UDPInFromHomeNetwork:
+# Allows inbound UDP traffic to the subnet from Internet.
+  UDPInFromInternet:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       NetworkAclId: !Ref OpenVpnVpcNACL
@@ -59,21 +59,9 @@ Resources:
         From: '1194'
         To: '1194'    
 
-# Allows inbound RDP traffic to the subnet from your home network.
-  RDPInFromHomeNetwork:
-    Type: AWS::EC2::NetworkAclEntry
-    Properties:
-      NetworkAclId: !Ref OpenVpnVpcNACL
-      RuleNumber: '120'
-      Protocol: "6"
-      RuleAction: allow
-      CidrBlock: !Ref SourceCidrBlock
-      PortRange:
-        From: '3389'
-        To: '3389'    
 
-# Allows inbound return traffic from requests originating from your home network.
-  AllInboundFromHomeNetwork:
+# Allows inbound return traffic from requests originating from Internet.
+  AllInboundFromInternet:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       NetworkAclId: !Ref OpenVpnVpcNACL
@@ -85,8 +73,8 @@ Resources:
         From: '32768'
         To: '65535'    
 
-# Allows all outbound traffic from the subnets to your home network.
-  AllOutboundToHomeNetwork:
+# Allows all outbound traffic from the subnets to Internet.
+  AllOutboundToInternet:
     Type: AWS::EC2::NetworkAclEntry
     Properties:
       Egress: 'true'

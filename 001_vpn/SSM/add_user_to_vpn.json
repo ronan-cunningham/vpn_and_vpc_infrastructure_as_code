@@ -6,9 +6,10 @@
       "type": "String",
       "description": "Add User to VPN"
     },
-    "Bucket": {
+    "ConfigDownloadBucket": {
       "type": "String",
-      "description": "Add User to VPN"
+      "description": "Add User to VPN",
+      "default": "open-vpn-config-download"
     }
 
   },
@@ -24,7 +25,7 @@
         "sed -i 's/clientuser/{{User}}/g' /etc/openvpn/keys/OpenVpn_{{User}}_client.conf",
         "cd /etc/openvpn;bash /etc/openvpn/gen_ovpn_{{User}}_profile.sh {{User}}",
         "cd /etc/openvpn/keys; zip {{User}}.zip ca.crt statictlssecret.key {{User}}.key {{User}}.crt openvpn_{{User}}.ovpn",
-        "cd /etc/openvpn/keys; aws s3 cp {{User}}.zip s3://{{Bucket}}/client/{{User}}.zip"
+        "cd /etc/openvpn/keys; aws s3 cp {{User}}.zip s3://{{ConfigDownloadBucket}}/client/{{User}}.zip"
       ]
     }
   }]

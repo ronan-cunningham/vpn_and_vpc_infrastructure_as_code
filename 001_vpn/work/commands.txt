@@ -1,16 +1,42 @@
+### Oven VPN Vpc# ##
 aws cloudformation  create-stack --stack-name OpenVpnVpc --template-body file://openvpn-vpc.yaml --capabilities CAPABILITY_NAMED_IAM
 aws cloudformation  update-stack --stack-name OpenVpnVpc --template-body file://openvpn-vpc.yaml --capabilities CAPABILITY_NAMED_IAM
+
+aws ssm create-document --content file://add_user_to_vpn.json  --name "AddUserToVPN" --document-type "Command" 
+aws ssm create-document --content file://remove_user_from_vpn.json  --name "RemoveUserFromVPN" --document-type "Command" 
+
+
+### DEV VPC ###
 aws cloudformation  create-stack  --stack-name DevVpc --template-body file://dev-vpc.yaml --capabilities CAPABILITY_NAMED_IAM
 aws cloudformation  create-stack --stack-name DevVpcPeering --template-body file://peer-dev-with-open-vpn.yaml --capabilities CAPABILITY_NAMED_IAM
 aws cloudformation  create-stack --stack-name DevVpcPrivateNACL --template-body file://dev-vpc-private-nacl.yaml --capabilities CAPABILITY_NAMED_IAM
 aws cloudformation  create-stack --stack-name DevVpcPublicNACL --template-body file://dev-vpc-public-nacl.yaml --capabilities CAPABILITY_NAMED_IAM
+
+### Build VPN Image ###
 aws cloudformation  create-stack --stack-name OpenVpnImageBuilder --template-body file://openvpn-image-builder.yaml --capabilities CAPABILITY_IAM
+
+
+### VPN AutoScaling Group ###
 aws cloudformation  create-stack --stack-name OpenVpnAsg --template-body file://openvpn-asg.yaml --capabilities CAPABILITY_IAM
+aws cloudformation  create-stack --stack-name OpenVpnAsg --template-body file://openvpn-asg-latest.yaml --capabilities CAPABILITY_IAM
 
 
+aws cloudformation  create-stack --stack-name OpenVpnAsg --template-body file://asg.yaml --capabilities CAPABILITY_IAM
 
+crl-verify /etc/openvpn/crl.pem
 
+### AS ROOT ####
+cp /etc/fstab /etc/fstab.bak
+ElasticFS='fs-9e9d65d6.efs.us-east-1.amazonaws.com'
+MountPoint='/etc/openvpn'
+echo "${ElasticFS}:/ ${MountPoint} nfs4 nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,_netdev 0 0" >> /etc/fstab
 
+crontab -e
+@reboot sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
+@reboot sudo sysctl -p
+@reboot sudo service openvpn start
+@reboot sudo chkconfig openvpn on
+@reboot sudo touch /tmp/rebooteda.txt
 
 
 

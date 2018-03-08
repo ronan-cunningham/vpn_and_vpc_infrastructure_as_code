@@ -5,7 +5,7 @@ Parameters:
   AMI:
     Description: AMI of OpenVPN Server
     Type: String
-    Default: ami-8b8b68f6
+    Default: ami-cfb54cb2
     Description: SSH Key for the OpenVPN Instance
   SSHKeyName:
     Type: AWS::EC2::KeyPair::KeyName
@@ -103,7 +103,7 @@ Resources:
 
                  - { EIP: !ImportValue OpenVpnVpcElasticIP
                    }      
-      Role: !ImportValue OpenVpnEC2InstanceRoleArn
+      Role: !ImportValue OpenVpnVpcEC2InstanceRoleArn
       
   SubscribeLambdaToTopic:
     Type: "AWS::SNS::Subscription"
@@ -127,24 +127,15 @@ Resources:
       IamInstanceProfile: !ImportValue OpenVpnEC2InstanceProfile
       ImageId: !Ref AMI
       SecurityGroups:
-        - !ImportValue OpenVPNInstanceSG
+        - !ImportValue OpenVpnVpcInstanceSG
       InstanceType: !Ref OpenVPNInstanceType
-      UserData:
-          "Fn::Base64":
-            !Sub |
-              #!/bin/bash
-              sysctl -p
-              yum -y update
-              iptables -t nat -A POSTROUTING -s 172.16.0.0/22 -o eth0 -j MASQUERADE
-              service openvpn stop
-              service openvpn start
               
   OpenVPNServerAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     Properties:
       VPCZoneIdentifier: 
-        - !ImportValue OpenVPNPublicSubnetA
-        - !ImportValue OpenVPNPublicSubnetB
+        - !ImportValue OpenVpnVpcPublicSubnetA
+        - !ImportValue OpenVpnVpcPublicSubnetB
       LaunchConfigurationName:
         Ref: OpenVPNServerLaunchConfig
       DesiredCapacity: '1'
